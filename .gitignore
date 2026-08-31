@@ -1,0 +1,19 @@
+# Umgebung / Zugangsdaten
+.env
+.env.*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# outputs/: für große Rasterdateien (GeoTIFF etc.) - werden NICHT versioniert.
+# Ausnahme: PNG-Übersichtskarten duerfen versioniert werden.
+outputs/*
+!outputs/*.png
+!outputs/.gitkeep
+
+# Rohdaten-Downloads (VG250-Zips u. ä.) - nicht versionieren
+data/raw/
