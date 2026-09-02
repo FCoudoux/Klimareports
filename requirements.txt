@@ -6,3 +6,6 @@ xarray
 rasterio
 matplotlib
 contextily
+openeo
+pystac-client
+python-dotenv

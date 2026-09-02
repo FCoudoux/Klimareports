@@ -14,10 +14,15 @@ Gemeindegeometrie einer Pilotgemeinde lädt und aufbereitet.
   zur Plausibilisierung. Ergebnis: `data/gernsbach_boundary.geojson` und eine
   einfache Übersichtskarte `outputs/gernsbach_boundary.png`.
 
-Weitere Schritte der Pipeline (NDVI aus Sentinel-2, Oberflächentemperatur aus
-Landsat, Versiegelungsgrad aus CLMS, Zensus-Überlagerung, Report-Generierung)
-sind gemäß `PROJECT_CONTEXT.md`, Teil C, geplant, aber **nicht** Teil dieses
-Tasks.
+- `scripts/02_ndvi_gernsbach.py` – berechnet NDVI (Vegetationsindex) für
+  Gernsbach aus Sentinel-2-L2A-Daten (Sommer 2025) über das Copernicus Data
+  Space Ecosystem (CDSE), Zugriff per openEO. Ergebnis: `outputs/gernsbach_ndvi.tif`
+  (Median-Komposit, nicht versioniert) und `outputs/gernsbach_ndvi.png`
+  (Übersichtskarte, versioniert).
+
+Weitere Schritte der Pipeline (Oberflächentemperatur aus Landsat,
+Versiegelungsgrad aus CLMS, Zensus-Überlagerung, Report-Generierung) sind
+gemäß `PROJECT_CONTEXT.md`, Teil C, geplant, aber **nicht** Teil dieses Tasks.
 
 ## Setup
 
@@ -92,6 +97,47 @@ Sentinel-2/Landsat/CDSE-Anbindung ist bewusst **nicht** Teil dieses Tasks,
 da dafür Zugangsdaten nötig wären, die in dieser Cloud-Umgebung nicht sicher
 gespeichert werden können. Das folgt als separater, lokal ausgeführter Schritt.
 
+## Task 2: NDVI aus Sentinel-2 (CDSE / openEO)
+
+`scripts/02_ndvi_gernsbach.py` fragt Sentinel-2-L2A-Szenen (Sommer 2025,
+Juni–August, max. 20 % Wolken über der Szene als Startwert) über dem
+Gemeindegebiet Gernsbach ab, berechnet NDVI = (B08-B04)/(B08+B04) je Szene,
+maskiert auf die exakte Gemeindegrenze und bildet daraus einen Median-Komposit
+über alle wolkenfreien Termine.
+
+**Zugang:** Copernicus Data Space Ecosystem (CDSE), OAuth2-Client-Credentials-
+Flow. Benötigt einen Sentinel-Hub-OAuth-Client (siehe
+https://dataspace.copernicus.eu/ → Kontoeinstellungen). Die Zugangsdaten
+werden **ausschließlich** aus der lokalen `.env`-Datei geladen (nicht
+versioniert, siehe `.gitignore`) und dürfen nie im Code oder in
+Konfigurationsdateien landen, die committet werden:
+
+```bash
+# .env (lokal, nicht committen)
+CDSE_CLIENT_ID=...
+CDSE_CLIENT_SECRET=...
+```
+
+**Aufruf:**
+
+```bash
+python scripts/02_ndvi_gernsbach.py
+# Wolkenbedeckungs-Schwelle (Startwert 20 %) bei Bedarf anpassen:
+python scripts/02_ndvi_gernsbach.py --max-cloud-cover 30
+```
+
+Fehlen die Umgebungsvariablen oder schlägt die openEO-Authentifizierung fehl,
+bricht das Skript mit einer klaren Fehlermeldung ab (kein Platzhalterwert,
+kein alternativer Zugang). Sind für den Sommer weniger als 3 wolkenfreie
+Termine verfügbar, gibt das Skript eine explizite Warnung aus, rechnet aber
+mit den verfügbaren Daten weiter.
+
+Ergebnis: `outputs/gernsbach_ndvi.tif` (GeoTIFF, nicht versioniert) und
+`outputs/gernsbach_ndvi.png` (Karte mit Farbskala Braun/Grau = wenig
+Vegetation, Grün = viel Vegetation). Am Ende gibt das Skript eine
+Sichtprüfungs-Zusammenfassung aus: Anzahl genutzter Szenen, Zeitraum der
+Termine, Min/Max/Median-NDVI über dem Gemeindegebiet.
+
 ## Projektstruktur
 
 ```
@@ -99,7 +145,8 @@ gespeichert werden können. Das folgt als separater, lokal ausgeführter Schritt
 ├── PROJECT_CONTEXT.md          # Businessplan & methodische Leitplanken
 ├── requirements.txt
 ├── scripts/
-│   └── 01_load_geometry.py
+│   ├── 01_load_geometry.py
+│   └── 02_ndvi_gernsbach.py
 ├── data/                       # GeoJSON-Ergebnisse (versioniert)
 └── outputs/                    # PNG-Übersichtskarten (versioniert),
                                  # große Rasterdateien (nicht versioniert)
