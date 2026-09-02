@@ -21,6 +21,28 @@ Tasks.
 
 ## Setup
 
+**Empfohlen: conda/conda-forge.** Das Projekt hängt von GDAL/PROJ/GEOS ab
+(transitiv über geopandas, rasterio, rioxarray). Diese C-Bibliotheken lassen
+sich über `pip install` auf vielen Systemen nur durch Kompilieren aus dem
+Quellcode installieren (kein Wheel für die jeweilige Python-/macOS-Version
+verfügbar) - das kann fehlschlagen oder unnötig lange dauern. Über
+`brew install gdal proj` besteht zusätzlich das Risiko, dass Homebrew ohne
+passendes Bottle für ältere macOS-Versionen ebenfalls alles aus dem
+Quellcode baut (inkl. schwerer Abhängigkeiten wie LLVM). conda-forge liefert
+GDAL/PROJ/GEOS dagegen als fertige Binärpakete aus - deutlich schneller und
+zuverlässiger:
+
+```bash
+conda create -n klimacheck -c conda-forge python=3.11 geopandas rioxarray rasterio \
+  pystac-client planetary-computer openeo shapely pyproj matplotlib contextily \
+  python-dotenv -y
+conda activate klimacheck
+```
+
+**Alternative: venv + pip** (`requirements.txt`), funktioniert nur zuverlässig,
+wenn für die eigene Python-Version/Plattform passende Wheels für GDAL/PROJ/GEOS
+auf PyPI vorliegen:
+
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
