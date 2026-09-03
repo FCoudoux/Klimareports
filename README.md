@@ -20,9 +20,15 @@ Gemeindegeometrie einer Pilotgemeinde lädt und aufbereitet.
   (Median-Komposit, nicht versioniert) und `outputs/gernsbach_ndvi.png`
   (Übersichtskarte, versioniert).
 
-Weitere Schritte der Pipeline (Oberflächentemperatur aus Landsat,
-Versiegelungsgrad aus CLMS, Zensus-Überlagerung, Report-Generierung) sind
-gemäß `PROJECT_CONTEXT.md`, Teil C, geplant, aber **nicht** Teil dieses Tasks.
+- `scripts/03_lst_gernsbach.py` – berechnet die Oberflächentemperatur-Anomalie
+  für Gernsbach aus Landsat 8/9 Collection 2 Level-2-Daten (Band ST, Sommer
+  2021–2025) über den Microsoft Planetary Computer STAC-Katalog. Ergebnis:
+  `outputs/gernsbach_lst_anomaly.tif` (nicht versioniert) und
+  `outputs/gernsbach_lst_anomaly.png` (Übersichtskarte, versioniert).
+
+Weitere Schritte der Pipeline (Versiegelungsgrad aus CLMS, Zensus-Überlagerung,
+Report-Generierung) sind gemäß `PROJECT_CONTEXT.md`, Teil C, geplant, aber
+**nicht** Teil dieses Tasks.
 
 ## Setup
 
@@ -40,7 +46,7 @@ zuverlässiger:
 ```bash
 conda create -n klimacheck -c conda-forge python=3.11 geopandas rioxarray rasterio \
   pystac-client planetary-computer openeo shapely pyproj matplotlib contextily \
-  python-dotenv -y
+  python-dotenv numpy -y
 conda activate klimacheck
 ```
 
@@ -138,6 +144,70 @@ Vegetation, Grün = viel Vegetation). Am Ende gibt das Skript eine
 Sichtprüfungs-Zusammenfassung aus: Anzahl genutzter Szenen, Zeitraum der
 Termine, Min/Max/Median-NDVI über dem Gemeindegebiet.
 
+## Task 3: Oberflächentemperatur-Anomalie aus Landsat 8/9 (Planetary Computer)
+
+`scripts/03_lst_gernsbach.py` fragt Landsat 8/9 Collection 2 Level-2-Szenen
+(Band ST, Sommer Juni–August, Jahre 2021–2025) über den Microsoft Planetary
+Computer STAC-Katalog ab. Sentinel-2 hat keinen Thermalkanal – die
+Oberflächentemperatur kommt ausschließlich aus Landsat.
+
+**Wolkenfilterung erfolgt zweistufig:**
+1. Szenen-Ebene: `eo:cloud_cover` unter der Schwelle (Startwert 20 %) und
+   nur Tier-1-Szenen (höchste radiometrische/geometrische Präzisionsstufe).
+2. Pixel-Ebene: Das QA_PIXEL-Band wird für jede Szene über dem Gemeindegebiet
+   ausgewertet (Bits für Wolke, Wolkenschatten, Cirrus, Wolken-Dilatation)
+   und maskiert betroffene Pixel einzeln aus – nicht nur szenenweise. Bleiben
+   dadurch weniger als 50 % der Gemeindefläche wolkenfrei, wird die Szene
+   verworfen, auch wenn ihre Szenen-Wolkenbedeckung unauffällig war (das war
+   die Schwäche im NDVI-Skript aus Task 2, die hier gezielt vermieden wird).
+
+Das ST-Band wird nach der offiziellen USGS-Skalierungsformel für Landsat
+Collection 2 Level-2 in Grad Celsius umgerechnet
+(`Kelvin = DN * 0.00341802 + 149.0`, dann `- 273.15`), auf EPSG:25832
+reprojiziert und auf die exakte Gemeindegeometrie maskiert.
+
+**Mittelung ist hierarchisch, nicht flach:** zuerst wird je Sommer über die
+nutzbaren Termine gemittelt, dann über die (bis zu) 5 Sommermittel – jeder
+Sommer geht damit gleich stark ein, unabhängig davon, wie viele wolkenfreie
+Termine er liefert. Ein einfacher Durchschnitt über alle Einzeltermine würde
+Sommer mit mehr wolkenfreien Terminen systematisch stärker gewichten – genau
+das Bewölkungsproblem, das die Mehrsommer-Aggregation eigentlich ausgleichen
+soll. Aus dem hierarchischen Mittelwert je Pixel wird die **Anomalie**
+berechnet: Pixelwert minus Mittelwert des gesamten Gemeindegebiets – **keine
+absoluten Temperaturschwellen** (siehe `PROJECT_CONTEXT.md`, Methodik-Regel 3).
+
+**Aufruf:**
+
+```bash
+python scripts/03_lst_gernsbach.py
+# Schwellenwerte bei Bedarf anpassen:
+python scripts/03_lst_gernsbach.py --max-cloud-cover 30 --min-flaechenanteil 40
+```
+
+Werden über alle Sommer keine nutzbaren Termine gefunden, oder liegen
+nutzbare Termine nur in einem einzigen Sommer vor (Aggregation über mehrere
+Sommer laut Methodik zwingend, wegen des Bewölkungsproblems in
+Mitteleuropa), bricht das Skript mit einer klaren Fehlermeldung ab – **kein
+Fallback auf einen einzelnen Termin oder Sommer**. Sind insgesamt oder je
+Sommer weniger als 3 nutzbare Termine verfügbar, gibt das Skript eine
+explizite Warnung aus, rechnet aber mit den verfügbaren Daten weiter.
+
+**Bekannte Limitierung:** Landsat überfliegt Gernsbach vormittags (Ortszeit ca.
+10:30) – das Nachmittagsmaximum der Aufheizung wird dadurch nicht erfasst,
+die Anomalie unterschätzt tendenziell die maximale Tagesamplitude (siehe
+`PROJECT_CONTEXT.md`).
+
+Ergebnis: `outputs/gernsbach_lst_anomaly.tif` (GeoTIFF, nicht versioniert)
+und `outputs/gernsbach_lst_anomaly.png` (Karte mit Farbskala Blau = kühler
+als Gemeindemittel, Rot = wärmer als Gemeindemittel). Am Ende gibt das
+Skript eine Sichtprüfungs-Zusammenfassung aus: Anzahl verwendeter/verworfener
+Szenen je Sommer, Wertebereich der Anomalie in Grad Celsius.
+
+**Wichtig – Begriffsklarheit (Methodik-Regel 2):** Das Ergebnis ist
+ausschließlich die Oberflächentemperatur (Landoberfläche), **nicht** die
+Lufttemperatur und **nicht** die thermische Belastung von Menschen. Diese
+Unterscheidung gilt für jede Interpretation der Karte.
+
 ## Projektstruktur
 
 ```
@@ -146,7 +216,8 @@ Termine, Min/Max/Median-NDVI über dem Gemeindegebiet.
 ├── requirements.txt
 ├── scripts/
 │   ├── 01_load_geometry.py
-│   └── 02_ndvi_gernsbach.py
+│   ├── 02_ndvi_gernsbach.py
+│   └── 03_lst_gernsbach.py
 ├── data/                       # GeoJSON-Ergebnisse (versioniert)
 └── outputs/                    # PNG-Übersichtskarten (versioniert),
                                  # große Rasterdateien (nicht versioniert)
