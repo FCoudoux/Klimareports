@@ -6,14 +6,25 @@ Datenquelle: Sentinel-2 L2A, CDSE (openeo.dataspace.copernicus.eu), Login
 über OAuth2 Client-Credentials-Flow erforderlich (siehe .env). Räumliche
 Auflösung 10 m (Bänder B04/B08).
 
+PIXELGENAUE WOLKENMASKIERUNG (konsistent mit scripts/02_ndvi_sinzheim.py und
+scripts/02_ndvi_badenbaden.py): Ursprünglich filterte dieses Skript nur
+szenenweise nach eo:cloud_cover - das lässt lokal verwolkte Szenen mit
+unauffälligem Szenen-Gesamtwert durch. Jetzt wird zusätzlich pixelgenau über
+das SCL-Band (Scene Classification Layer) maskiert, BEVOR resampled/
+aggregiert wird: Wolken, Wolkenschatten, Cirrus und Kein-Daten/defekte Pixel
+werden serverseitig (openEO) aus dem NDVI-Ergebnis ausgeschlossen, nicht nur
+auf Szenen-Ebene gefiltert - identischer Ansatz wie bei Sinzheim/Baden-Baden,
+damit die NDVI-Werte der drei Pilotgemeinden vergleichbar sind.
+
 Ablauf:
     1. Gemeindegeometrie aus data/gernsbach_boundary.geojson laden
        (erzeugt von scripts/01_load_geometry.py).
     2. Bei CDSE per openEO authentifizieren (Client-Credentials, aus .env).
     3. Verfügbare wolkenarme Sentinel-2-L2A-Termine für Sommer 2025 über dem
        Gemeindegebiet ermitteln (Sichtprüfung, ob genug Termine vorhanden sind).
-    4. NDVI = (B08-B04)/(B08+B04) serverseitig berechnen, auf die exakte
-       Gemeindegrenze maskieren, Median-Komposit über die Zeit bilden.
+    4. B04, B08 und SCL laden, per SCL pixelgenau Wolken/Schatten/Cirrus
+       ausmaskieren, NDVI = (B08-B04)/(B08+B04) serverseitig berechnen, auf
+       die exakte Gemeindegrenze maskieren, Median-Komposit über die Zeit bilden.
     5. Ergebnis als GeoTIFF speichern, PNG-Karte erzeugen, Kennzahlen ausgeben.
 
 Nutzung:
@@ -67,6 +78,12 @@ ZIEL_CRS_EPSG = 25832  # ETRS89/UTM32N - Vorgabe für alle Flächen-/Rasterberec
 SOMMER_START = "2025-06-01"
 SOMMER_ENDE_EXKLUSIV = "2025-09-01"  # openEO-Zeitintervalle sind oben exklusiv
 MIN_WOLKENFREIE_TERMINE = 3
+
+# SCL-Klassen (Sentinel-2 L2A Scene Classification Layer), die aus der
+# NDVI-Berechnung ausgeschlossen werden - pixelgenau, nicht nur szenenweise:
+# 0 No Data, 1 Saturated/Defective, 3 Cloud Shadows, 8 Cloud Medium Probability,
+# 9 Cloud High Probability, 10 Thin Cirrus.
+SCL_AUSSCHLUSSKLASSEN = [0, 1, 3, 8, 9, 10]
 
 
 def lade_zugangsdaten() -> tuple[str, str]:
@@ -157,12 +174,23 @@ def baue_ndvi_datacube(
         OPENEO_COLLECTION_ID,
         spatial_extent=spatial_extent,
         temporal_extent=[SOMMER_START, SOMMER_ENDE_EXKLUSIV],
-        bands=["B04", "B08"],
+        bands=["B04", "B08", "SCL"],
         max_cloud_cover=max_cloud_cover,
     )
     # Auf die exakte Gemeindegrenze maskieren (nicht nur die Bounding-Box) -
     # Pixel außerhalb werden zu No-Data.
     cube = cube.mask_polygon(geometrie)  # srs default: EPSG:4326 (lon-lat), passt zur Geometrie
+
+    # Pixelgenaue Wolken-/Schattenmaskierung über SCL, VOR dem Resampling -
+    # verhindert, dass verwolkte Pixel unerkannt in den 10m-Median einfließen.
+    scl = cube.band("SCL")
+    wolken_maske = None
+    for klasse in SCL_AUSSCHLUSSKLASSEN:
+        vergleich = scl == klasse
+        wolken_maske = vergleich if wolken_maske is None else (wolken_maske | vergleich)
+    cube = cube.filter_bands(["B04", "B08"])
+    cube = cube.mask(wolken_maske)
+
     # Sentinel-2 liefert nativ EPSG:326xx (WGS84/UTM). Projektvorgabe (PROJECT_CONTEXT.md):
     # immer in ETRS89/UTM rechnen, nie in WGS84 - daher hier auf EPSG:25832 umprojizieren.
     cube = cube.resample_spatial(resolution=10, projection=ZIEL_CRS_EPSG, method="bilinear")
@@ -173,7 +201,7 @@ def baue_ndvi_datacube(
 
 def fuehre_batch_job_aus(cube: openeo.DataCube, ziel: Path) -> None:
     ziel.parent.mkdir(parents=True, exist_ok=True)
-    print("Starte openEO-Batch-Job (NDVI-Median-Komposit)...")
+    print("Starte openEO-Batch-Job (NDVI-Median-Komposit, pixelgenau SCL-maskiert)...")
     cube.execute_batch(outputfile=ziel, title="Gernsbach NDVI Sommer 2025")
     print(f"NDVI-GeoTIFF gespeichert: {ziel}")
 
@@ -273,9 +301,10 @@ def main() -> int:
     erzeuge_karte(TIF_OUT, gdf, PNG_OUT)
 
     print("\n--- Sichtprüfungs-Zusammenfassung ---")
-    print(f"Verwendete Szenen (eindeutige Aufnahmetermine): {len(termine)}")
+    print(f"Verwendete Szenen (eindeutige Aufnahmetermine, Szenen-Wolkenfilter): {len(termine)}")
     print(f"Zeitraum der genutzten Termine: {termine[0].isoformat()} bis {termine[-1].isoformat()}")
     print(f"NDVI min / median / max über dem Gemeindegebiet: {ndvi_min:.3f} / {ndvi_median:.3f} / {ndvi_max:.3f}")
+    print("Hinweis: zusätzlich zur Szenen-Wolkenfilterung wurden Wolken/Schatten/Cirrus pixelgenau über SCL ausmaskiert.")
     if len(termine) < MIN_WOLKENFREIE_TERMINE:
         print(f"WARNUNG: weniger als {MIN_WOLKENFREIE_TERMINE} wolkenfreie Termine verfügbar (s.o.).")
 

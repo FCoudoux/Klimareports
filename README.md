@@ -107,9 +107,24 @@ gespeichert werden können. Das folgt als separater, lokal ausgeführter Schritt
 
 `scripts/02_ndvi_gernsbach.py` fragt Sentinel-2-L2A-Szenen (Sommer 2025,
 Juni–August, max. 20 % Wolken über der Szene als Startwert) über dem
-Gemeindegebiet Gernsbach ab, berechnet NDVI = (B08-B04)/(B08+B04) je Szene,
-maskiert auf die exakte Gemeindegrenze und bildet daraus einen Median-Komposit
-über alle wolkenfreien Termine.
+Gemeindegebiet Gernsbach ab. Wolken/Schatten/Cirrus werden zusätzlich
+**pixelgenau** über das SCL-Band (Scene Classification Layer) ausmaskiert,
+bevor auf 10 m resampled und der NDVI-Median gebildet wird – nicht nur
+szenenweise über `eo:cloud_cover` gefiltert. Dieselbe Methodik wie bei
+`02_ndvi_sinzheim.py`/`02_ndvi_badenbaden.py`, damit die NDVI-Werte der drei
+Pilotgemeinden vergleichbar sind (siehe Abschnitte Sinzheim/Baden-Baden unten).
+
+> **Nachträglich vereinheitlicht:** Ursprünglich filterte dieses Skript nur
+> auf Szenen-Ebene (Schwäche, die erst bei Sinzheim/Baden-Baden behoben
+> wurde). Nach Umstellung auf dieselbe pixelgenaue SCL-Maskierung: NDVI
+> Median 0,844 → 0,848, Mittelwert 0,816 → 0,819, Max 0,935 → 0,936, Min
+> unverändert (−0,168). Die Verschiebung ist klein und geht in die erwartete
+> Richtung (leicht nach oben, da vorher unerkannte, leicht wolken-/dunst-
+> kontaminierte Pixel mit unterdrücktem NDVI jetzt aus dem Median
+> ausgeschlossen werden) – für Gernsbachs Sommer 2025 war die
+> Restkontamination nach reiner Szenen-Filterung offenbar gering. Anzahl
+> genutzter Termine unverändert (16), da die Szenen-Wolkenfilterung selbst
+> nicht geändert wurde.
 
 **Zugang:** Copernicus Data Space Ecosystem (CDSE), OAuth2-Client-Credentials-
 Flow. Benötigt einen Sentinel-Hub-OAuth-Client (siehe
