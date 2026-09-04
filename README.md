@@ -269,6 +269,55 @@ pixelgenau über QA_PIXEL), hierarchische Mittelung (erst je Sommer, dann
 getrennte Konsolen-Ausgabe von Anomalie- und Absolutwerten sowie der
 Hinweis auf die Landsat-Vormittags-Überflugzeit als bekannte Limitierung.
 
+## Baden-Baden (AGS 08211000)
+
+Dritte Pilotgemeinde (siehe `PROJECT_CONTEXT.md`, Pilotgemeinden-Tabelle) –
+bewusst der **Komfort-/Vergleichsfall**, nicht das eigentliche Zielsegment
+(56.952 Einwohner, deutlich größer/dichter durchmischt als Gernsbach/
+Sinzheim). Auch hier eigene, auf Baden-Baden zugeschnittene Skripte statt
+generischer Mehrgemeinden-Automatisierung:
+
+- `scripts/01_load_geometry_badenbaden.py`
+- `scripts/02_ndvi_badenbaden.py`
+- `scripts/03_lst_badenbaden.py`
+
+**Besonderheit – Stadtkreis statt kreisangehöriger Gemeinde:** Baden-Baden
+ist ein Stadtkreis (kreisfreie Stadt). Explizit geprüft (nicht angenommen),
+wie sich das in VG250 niederschlägt: Baden-Baden ist auf der Gemeinde-Ebene
+(`VG250_GEM`, AGS `08211000`, BEZ „Stadt“) genauso ein einzelner Datensatz
+wie Gernsbach/Sinzheim – dieselbe Ebene wird verwendet. Zusätzlich taucht
+Baden-Baden **redundant** auf der Kreis-Ebene auf (`VG250_KRS`, AGS `08211`,
+BEZ „Stadtkreis“) mit geometrisch identischer Fläche (139,87 km² auf beiden
+Ebenen) – das ist bei einem Stadtkreis so vorgesehen (gleichzeitig Gemeinde
+und Kreis) und keine Dateninkonsistenz. Die Pipeline nutzt ausschließlich
+`VG250_GEM`, um konsistent zu Gernsbach/Sinzheim zu bleiben; die KRS-Ebene
+wird nicht geladen.
+
+**MultiPolygon auch hier:** Die VG250-Geometrie für Baden-Baden ist – wie bei
+Sinzheim – ein MultiPolygon (4 Teilflächen: 1 Hauptkörper + 3 kleinere
+Fragmente von zusammen < 0,5 km², vermutlich Verwaltungsgrenz-Artefakte im
+Umfeld der Sinzheimer Exklaven). Dieselbe MultiPolygon-sichere Behandlung wie
+bei Sinzheim greift automatisch (`geometry.geom_type`-Prüfung, `total_bounds`
+für Bounding Box/STAC-Suche, `rasterio.features.geometry_mask` bzw. openEO
+`mask_polygon` für die Maskierung, `union`-Logik bei möglichen
+VG250-Mehrfachtreffern von Anfang an eingebaut).
+
+**Referenzfläche verifiziert gegen amtliche Quelle** (nicht nur Wikipedia):
+Gemeindeverzeichnis-Informationssystem (gemeinsames Portal von Destatis und
+den Statistischen Ämtern der Länder), statistikportal.de – 140,19 km²,
+intern konsistent mit der dort ausgewiesenen Bevölkerungsdichte
+(406 Einwohner/km² bei 56.952 Einwohnern). VG250-Berechnung: 139,87 km²
+(≈0,23 % Abweichung, im Toleranzbereich).
+
+`02_ndvi_badenbaden.py` und `03_lst_badenbaden.py` übernehmen von Anfang an
+alle Korrekturen aus Gernsbach/Sinzheim: pixelgenaue SCL-Maskierung (NDVI)
+bzw. zweistufige QA_PIXEL-Wolkenfilterung und hierarchische Mittelung (LST),
+getrennte Anomalie-/Absolutwert-Ausgabe sowie der Hinweis auf die
+Landsat-Vormittags-Überflugzeit.
+
+Ergebnisse: `data/badenbaden_boundary.geojson`, `outputs/badenbaden_boundary.png`,
+`outputs/badenbaden_ndvi.tif`/`.png`, `outputs/badenbaden_lst_anomaly.tif`/`.png`.
+
 ## Projektstruktur
 
 ```
@@ -278,10 +327,13 @@ Hinweis auf die Landsat-Vormittags-Überflugzeit als bekannte Limitierung.
 ├── scripts/
 │   ├── 01_load_geometry.py
 │   ├── 01_load_geometry_sinzheim.py
+│   ├── 01_load_geometry_badenbaden.py
 │   ├── 02_ndvi_gernsbach.py
 │   ├── 02_ndvi_sinzheim.py
+│   ├── 02_ndvi_badenbaden.py
 │   ├── 03_lst_gernsbach.py
-│   └── 03_lst_sinzheim.py
+│   ├── 03_lst_sinzheim.py
+│   └── 03_lst_badenbaden.py
 ├── data/                       # GeoJSON-Ergebnisse (versioniert)
 └── outputs/                    # PNG-Übersichtskarten (versioniert),
                                  # große Rasterdateien (nicht versioniert)
