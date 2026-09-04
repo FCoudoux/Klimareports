@@ -208,6 +208,67 @@ ausschließlich die Oberflächentemperatur (Landoberfläche), **nicht** die
 Lufttemperatur und **nicht** die thermische Belastung von Menschen. Diese
 Unterscheidung gilt für jede Interpretation der Karte.
 
+## Sinzheim (AGS 08216049)
+
+Zweite Pilotgemeinde nach Gernsbach (siehe `PROJECT_CONTEXT.md`,
+Pilotgemeinden-Tabelle), mit eigenen, auf Sinzheim zugeschnittenen Skripten
+je Kennzahl – **keine** generische Mehrgemeinden-Automatisierung (die ist
+laut `PROJECT_CONTEXT.md` erst für Phase 3 vorgesehen):
+
+- `scripts/01_load_geometry_sinzheim.py`
+- `scripts/02_ndvi_sinzheim.py`
+- `scripts/03_lst_sinzheim.py`
+
+**Besonderheit – MultiPolygon-Geometrie:** Sinzheim besteht aus 9 Ortsteilen,
+von denen 3 als Exklaven vollständig innerhalb der Gemarkung der Stadt
+Baden-Baden liegen. Die VG250-Geometrie ist deshalb ein MultiPolygon mit 4
+Teilflächen (Hauptkörper + 3 Exklaven), kein einzelnes zusammenhängendes
+Polygon wie bei Gernsbach. Alle drei Skripte prüfen den Geometrietyp
+explizit (`geometry.geom_type`) und geben ihn aus, statt ihn stillschweigend
+vorauszusetzen:
+
+- **Fläche:** shapely summiert `MultiPolygon.area` automatisch über alle
+  Teilflächen; `01_load_geometry_sinzheim.py` verifiziert das zusätzlich
+  durch eine unabhängige Summierung über `geometry.geoms` und bricht ab,
+  falls beide Werte voneinander abweichen. Trifft der AGS-Filter auf mehrere
+  VG250-Datensätze zu, werden diese zu einer Geometrie vereinigt (`union`)
+  statt stillschweigend nur den ersten Treffer zu verwenden – sonst könnten
+  Exklaven unbemerkt verloren gehen.
+- **NDVI/LST-Suche:** Bounding Box und räumliche Filter basieren auf
+  `gdf.total_bounds`, das automatisch alle Teilflächen (inkl. Exklaven)
+  abdeckt, nicht nur den größten zusammenhängenden Teil. `mask_polygon`
+  (openEO) und `rasterio.features.geometry_mask` (LST) unterstützen
+  MultiPolygon nativ – die Fläche der Stadt Baden-Baden zwischen den
+  Exklaven bleibt dabei korrekt außerhalb der Gemeindemaske.
+- **Karten:** `geopandas`-Boundary-Plots zeichnen MultiPolygon-Geometrien
+  (disjunkte Teilflächen) bereits nativ vollständig; alle drei Kartenskripte
+  verzichten deshalb bewusst auf eine Sonderbehandlung, weisen die Anzahl
+  der Teilflächen aber explizit im Titel/in der Konsolenausgabe aus.
+
+Ergebnisse: `data/sinzheim_boundary.geojson`, `outputs/sinzheim_boundary.png`,
+`outputs/sinzheim_ndvi.tif`/`.png`, `outputs/sinzheim_lst_anomaly.tif`/`.png`.
+
+**Hinweis zum VG250-Download:** Der direkte Remote-Zip-Zugriff
+(`zip+https://...`, siehe `--url`-Option) ist bei diesem Datenstand
+fehlgeschlagen, obwohl die URL selbst erreichbar war (GDAL/vsicurl konnte
+das Zip-Format nicht erkennen). Funktioniert hat stattdessen: Paket lokal
+laden (`curl -o ... <url>`), entpacken und `VG250_GEM.shp` über
+`--local-shapefile` übergeben – dieselbe Option, die für netzwerk-
+eingeschränkte Umgebungen vorgesehen ist (s.o.).
+
+`02_ndvi_sinzheim.py` übernimmt zusätzlich die aus Gernsbach gelernte Lehre
+direkt: Wolken/Schatten/Cirrus werden serverseitig über das SCL-Band (Scene
+Classification Layer) **pixelgenau** ausmaskiert, bevor auf 10 m resampled
+und der Median gebildet wird – nicht nur szenenweise über `eo:cloud_cover`
+gefiltert (das war die im Gernsbach-NDVI-Skript offen gelassene Schwäche).
+
+`03_lst_sinzheim.py` übernimmt von Anfang an alle Korrekturen aus dem
+Gernsbach-Durchlauf: zweistufige Wolkenfilterung (Szenen-Ebene +
+pixelgenau über QA_PIXEL), hierarchische Mittelung (erst je Sommer, dann
+über die Sommermittel – kein einfacher Durchschnitt über alle Einzeltermine),
+getrennte Konsolen-Ausgabe von Anomalie- und Absolutwerten sowie der
+Hinweis auf die Landsat-Vormittags-Überflugzeit als bekannte Limitierung.
+
 ## Projektstruktur
 
 ```
@@ -216,8 +277,11 @@ Unterscheidung gilt für jede Interpretation der Karte.
 ├── requirements.txt
 ├── scripts/
 │   ├── 01_load_geometry.py
+│   ├── 01_load_geometry_sinzheim.py
 │   ├── 02_ndvi_gernsbach.py
-│   └── 03_lst_gernsbach.py
+│   ├── 02_ndvi_sinzheim.py
+│   ├── 03_lst_gernsbach.py
+│   └── 03_lst_sinzheim.py
 ├── data/                       # GeoJSON-Ergebnisse (versioniert)
 └── outputs/                    # PNG-Übersichtskarten (versioniert),
                                  # große Rasterdateien (nicht versioniert)

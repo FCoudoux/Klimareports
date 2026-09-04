@@ -1,15 +1,25 @@
 """
-Lädt die amtliche Gemeindegeometrie für Gernsbach (AGS 08216017) aus den
+Lädt die amtliche Gemeindegeometrie für Sinzheim (AGS 08216049) aus den
 BKG VG250-Verwaltungsgebieten und bereitet sie für die weitere Pipeline auf.
 
+BESONDERHEIT SINZHEIM (siehe PROJECT_CONTEXT.md, Pilotgemeinden-Tabelle):
+Sinzheim besteht aus 9 Ortsteilen, von denen 3 als Exklaven vollständig
+innerhalb der Gemarkung der Stadt Baden-Baden liegen. Die VG250-Geometrie ist
+deshalb sehr wahrscheinlich ein MultiPolygon, kein einzelnes zusammenhängendes
+Polygon wie bei Gernsbach. Dieses Skript prüft das explizit (geometry.geom_type)
+und stellt sicher, dass Flächenberechnung, Speicherung und Kartendarstellung
+alle Teilflächen erfassen - shapely/geopandas summieren Flächen und zeichnen
+Geometrien für MultiPolygon bereits korrekt über alle Teilflächen, das wird
+hier durch den expliziten Log-Hinweis nachvollziehbar gemacht statt stillschweigend
+vorausgesetzt.
+
 Datenquelle: BKG VG250 (Verwaltungsgebiete 1:250.000), Open Data,
-Lizenz dl-de/by-2-0. Kein Login/API-Key nötig - siehe README.md für den
-bekannten Netzwerk-Einschränkungshinweis in dieser Cloud-Umgebung.
+Lizenz dl-de/by-2-0. Kein Login/API-Key nötig.
 
 Nutzung:
-    python scripts/01_load_geometry.py
-    python scripts/01_load_geometry.py --local-shapefile data/raw/vg250_gem.shp
-    python scripts/01_load_geometry.py --url https://.../vg250_ebenen.zip
+    python scripts/01_load_geometry_sinzheim.py
+    python scripts/01_load_geometry_sinzheim.py --local-shapefile data/raw/vg250_gem.shp
+    python scripts/01_load_geometry_sinzheim.py --url https://.../vg250_ebenen.zip
 """
 
 from __future__ import annotations
@@ -21,16 +31,22 @@ from pathlib import Path
 import geopandas as gpd
 import matplotlib.pyplot as plt
 
-AGS_GERNSBACH = "08216017"
-REFERENZ_FLAECHE_KM2 = 82.03
+AGS_SINZHEIM = "08216049"
+# Amtliche Gemeindefläche verifiziert gegen das Gemeindeverzeichnis-Informationssystem
+# (gemeinsames Portal von Destatis und den Statistischen Ämtern der Länder),
+# https://www.statistikportal.de/de/gemeindeverzeichnis/08216049 : 28,50 km²
+# (intern konsistent mit dort ausgewiesener Bevölkerungsdichte 405 Einwohner/km²
+# bei 11.547 Einwohnern). Deckungsgleich mit sinzheim.de (Zahlen-Daten-Fakten)
+# und Wikipedia-Infobox. Stand Recherche 2026 - nicht geraten.
+REFERENZ_FLAECHE_KM2 = 28.5
 FLAECHEN_TOLERANZ_PROZENT = 5.0
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = REPO_ROOT / "data"
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 
-GEOJSON_OUT = DATA_DIR / "gernsbach_boundary.geojson"
-PNG_OUT = OUTPUTS_DIR / "gernsbach_boundary.png"
+GEOJSON_OUT = DATA_DIR / "sinzheim_boundary.geojson"
+PNG_OUT = OUTPUTS_DIR / "sinzheim_boundary.png"
 
 # Bekannte VG250-Downloadquellen des BKG (Open Data, dl-de/by-2-0).
 # Die konkrete Zip-URL ändert sich mit jedem Datenstand; siehe
@@ -73,9 +89,6 @@ def lade_vg250_gemeinden(url: str | None, local_path: str | None) -> gpd.GeoData
 
     raise RuntimeError(
         "Konnte die VG250-Gemeindegrenzen weder herunterladen noch lokal finden.\n"
-        "Bekannte Einschränkung: In dieser Cloud-Sandbox ist der ausgehende "
-        "Netzwerkzugriff auf daten.gdz.bkg.bund.de durch die Umgebungs-Policy "
-        "gesperrt (siehe README.md, Abschnitt 'Bekannte Einschränkungen').\n"
         "Abhilfe: VG250-Paket lokal (z.B. auf einem Rechner mit Internetzugang) "
         "von https://gdz.bkg.bund.de/index.php/default/verwaltungsgebiete-1-250-000-stand-01-01-vg250.html "
         "herunterladen, entpacken und den Pfad zur Gemeinde-Shapefile/GeoPackage-Ebene "
@@ -87,16 +100,11 @@ def lade_vg250_gemeinden(url: str | None, local_path: str | None) -> gpd.GeoData
 def filtere_gemeinde(gdf: gpd.GeoDataFrame, ags: str) -> gpd.GeoDataFrame:
     """Filtert die VG250-Gemeindeebene nach amtlichem Gemeindeschlüssel (AGS).
 
-    Retroaktiv geprüft (Anlass: Sinzheim-MultiPolygon-Fall, siehe
-    scripts/01_load_geometry_sinzheim.py): Für Gernsbach (AGS 08216017) gibt es
-    im VG250-Datensatz genau EINEN Treffer (Geometrietyp Polygon) - verifiziert
-    sowohl gegen einen frischen VG250-Download als auch gegen das bereits
-    committete data/gernsbach_boundary.geojson (1 Feature, Polygon). Der frühere
-    "nur ersten Treffer verwenden"-Zweig unten wurde bei diesem Lauf also nie
-    ausgelöst und hat kein falsches Ergebnis erzeugt - kein Rerun nötig. Trifft
-    der Filter auf mehrere Datensätze zu, werden diese trotzdem zu EINER
-    Geometrie vereinigt (union) statt nur den ersten zu verwenden, damit
-    Teilflächen (z.B. Exklaven) nie stillschweigend verloren gehen.
+    Trifft der Filter auf mehrere Datensätze zu, werden diese zu EINER
+    Gemeindegeometrie vereinigt (z.B. falls Exklaven als separate Features
+    statt als ein MultiPolygon-Feature abgelegt sind) - es wird NIE
+    stillschweigend nur der erste Treffer verwendet, das würde Teilflächen
+    (z.B. Exklaven) unbemerkt verlieren.
     """
     ags_spalte = None
     for kandidat in ("AGS", "ags", "AGS_0"):
@@ -121,12 +129,54 @@ def filtere_gemeinde(gdf: gpd.GeoDataFrame, ags: str) -> gpd.GeoDataFrame:
         "stillschweigend verworfen wird."
     )
     vereinigte_geometrie = treffer.geometry.union_all()
-    return gpd.GeoDataFrame({ags_spalte: [ags]}, geometry=[vereinigte_geometrie], crs=gdf.crs)
+    vereinigt = gpd.GeoDataFrame({ags_spalte: [ags]}, geometry=[vereinigte_geometrie], crs=gdf.crs)
+    return vereinigt
+
+
+def pruefe_geometrietyp(gdf: gpd.GeoDataFrame) -> None:
+    """Gibt den Geometrietyp explizit aus - Pflicht laut Aufgabenstellung, damit
+    MultiPolygon-Fälle (Exklaven) nicht stillschweigend wie ein einzelnes
+    Polygon behandelt werden."""
+    geometrie = gdf.geometry.iloc[0]
+    geom_type = geometrie.geom_type
+    if geom_type == "MultiPolygon":
+        anzahl_teilflaechen = len(geometrie.geoms)
+        print(
+            f"Geometrietyp: MultiPolygon mit {anzahl_teilflaechen} Teilflächen "
+            "(erwartet bei Sinzheim wegen der 3 Exklaven in der Gemarkung Baden-Baden)."
+        )
+    elif geom_type == "Polygon":
+        print(
+            "Geometrietyp: Polygon (einzelne zusammenhängende Fläche) - "
+            "KEIN MultiPolygon gefunden, obwohl laut PROJECT_CONTEXT.md wegen der "
+            "3 Exklaven eines erwartet wurde. Bitte VG250-Datenstand/AGS-Filter prüfen, "
+            "bevor mit dieser Geometrie weitergearbeitet wird."
+        )
+    else:
+        raise TypeError(
+            f"Unerwarteter Geometrietyp '{geom_type}' für Sinzheim - erwartet wurde "
+            "Polygon oder MultiPolygon. Abbruch, keine stillschweigende Weiterverarbeitung."
+        )
 
 
 def berechne_flaeche_km2(gdf_utm: gpd.GeoDataFrame) -> float:
-    """Berechnet die Fläche in km² aus einer bereits in EPSG:25832 projizierten Geometrie."""
-    return float(gdf_utm.geometry.area.iloc[0] / 1_000_000)
+    """Berechnet die Fläche in km² aus einer bereits in EPSG:25832 projizierten
+    Geometrie. shapely.MultiPolygon.area summiert automatisch über alle
+    Teilflächen (Exklaven) - hier zusätzlich explizit über .geoms verifiziert,
+    damit sich niemand auf dieses shapely-interne Verhalten "blind" verlassen muss.
+    """
+    geometrie = gdf_utm.geometry.iloc[0]
+    flaeche_m2 = geometrie.area
+    if geometrie.geom_type == "MultiPolygon":
+        flaeche_teilflaechen_summe = sum(teil.area for teil in geometrie.geoms)
+        if abs(flaeche_teilflaechen_summe - flaeche_m2) > 1.0:  # 1 m² Toleranz für Fließkomma
+            raise RuntimeError(
+                "Flächensumme der Teilflächen weicht von geometrie.area ab "
+                f"({flaeche_teilflaechen_summe:.1f} m² vs. {flaeche_m2:.1f} m²) - "
+                "Flächenberechnung nicht plausibel, Abbruch statt stillschweigend "
+                "falschem Ergebnis."
+            )
+    return float(flaeche_m2 / 1_000_000)
 
 
 def plausibilisiere_flaeche(berechnete_flaeche_km2: float) -> None:
@@ -156,11 +206,19 @@ def speichere_geojson(gdf_utm: gpd.GeoDataFrame, pfad: Path) -> None:
 
 
 def erzeuge_uebersichtskarte(gdf_utm: gpd.GeoDataFrame, pfad: Path) -> None:
+    """Zeichnet die Gemeindegrenze. geopandas.GeoSeries.plot()/.boundary.plot()
+    zeichnen MultiPolygon-Geometrien bereits nativ vollständig (alle Teilflächen,
+    auch disjunkte) - keine Sonderbehandlung nötig, hier zusätzlich per
+    Flächenanzahl im Titel sichtbar gemacht."""
     pfad.parent.mkdir(parents=True, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(6, 6))
+    geometrie = gdf_utm.geometry.iloc[0]
+    teilflaechen_hinweis = (
+        f" ({len(geometrie.geoms)} Teilflächen)" if geometrie.geom_type == "MultiPolygon" else ""
+    )
+    fig, ax = plt.subplots(figsize=(7, 7))
     gdf_utm.boundary.plot(ax=ax, color="black", linewidth=1.5)
     gdf_utm.plot(ax=ax, color="#c6dbef", edgecolor="black", alpha=0.6)
-    ax.set_title(f"Gemeindegrenze Gernsbach (AGS {AGS_GERNSBACH})")
+    ax.set_title(f"Gemeindegrenze Sinzheim (AGS {AGS_SINZHEIM}){teilflaechen_hinweis}")
     ax.set_xlabel("Rechtswert [m, EPSG:25832]")
     ax.set_ylabel("Hochwert [m, EPSG:25832]")
     ax.set_aspect("equal")
@@ -191,14 +249,16 @@ def main() -> int:
         print(f"\nFEHLER: {exc}", file=sys.stderr)
         return 1
 
-    gernsbach = filtere_gemeinde(vg250_gemeinden, AGS_GERNSBACH)
-    gernsbach_utm = gernsbach.to_crs(epsg=25832)
+    sinzheim = filtere_gemeinde(vg250_gemeinden, AGS_SINZHEIM)
+    sinzheim_utm = sinzheim.to_crs(epsg=25832)
 
-    flaeche_km2 = berechne_flaeche_km2(gernsbach_utm)
+    pruefe_geometrietyp(sinzheim_utm)
+
+    flaeche_km2 = berechne_flaeche_km2(sinzheim_utm)
     plausibilisiere_flaeche(flaeche_km2)
 
-    speichere_geojson(gernsbach_utm, GEOJSON_OUT)
-    erzeuge_uebersichtskarte(gernsbach_utm, PNG_OUT)
+    speichere_geojson(sinzheim_utm, GEOJSON_OUT)
+    erzeuge_uebersichtskarte(sinzheim_utm, PNG_OUT)
 
     return 0
 
