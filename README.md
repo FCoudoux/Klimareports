@@ -26,9 +26,17 @@ Gemeindegeometrie einer Pilotgemeinde lädt und aufbereitet.
   `outputs/gernsbach_lst_anomaly.tif` (nicht versioniert) und
   `outputs/gernsbach_lst_anomaly.png` (Übersichtskarte, versioniert).
 
-Weitere Schritte der Pipeline (Versiegelungsgrad aus CLMS, Zensus-Überlagerung,
-Report-Generierung) sind gemäß `PROJECT_CONTEXT.md`, Teil C, geplant, aber
-**nicht** Teil dieses Tasks.
+- `scripts/04_imperviousness_gernsbach.py` – berechnet den Versiegelungsgrad
+  für Gernsbach aus dem Copernicus Land Monitoring Service (CLMS, HRL
+  Imperviousness Density 2018, 10 m), absolute Prozentkennzahl (keine
+  Anomalie). Ergebnis: `outputs/gernsbach_imperviousness.tif` (nicht
+  versioniert) und `outputs/gernsbach_imperviousness.png` (Übersichtskarte,
+  versioniert). Details siehe Abschnitt "Task 4" unten.
+
+Sinzheim und Baden-Baden haben eigene, analoge Skript-Sätze (siehe die
+gleichnamigen Abschnitte unten). Weitere Schritte der Pipeline
+(Zensus-Überlagerung, Report-Generierung) sind gemäß `PROJECT_CONTEXT.md`,
+Teil C, geplant, aber **nicht** Teil dieses Tasks.
 
 ## Setup
 
@@ -223,6 +231,117 @@ ausschließlich die Oberflächentemperatur (Landoberfläche), **nicht** die
 Lufttemperatur und **nicht** die thermische Belastung von Menschen. Diese
 Unterscheidung gilt für jede Interpretation der Karte.
 
+## Task 4: Versiegelungsgrad aus dem Copernicus Land Monitoring Service (CLMS)
+
+`scripts/04_imperviousness_gernsbach.py` / `04_imperviousness_sinzheim.py` /
+`04_imperviousness_badenbaden.py` berechnen den Versiegelungsgrad je
+Pilotgemeinde aus dem CLMS-Produkt **"High Resolution Layer Imperviousness
+Density" (HRL Imperviousness)**, Epoche **2018** (10 m Auflösung, EEA38,
+Referenzperiode 2017–2019).
+
+**WICHTIG – abweichend von Task 2/Task 3:** Der Versiegelungsgrad ist eine
+**absolute Prozentkennzahl** (0–100 % je Pixel), **keine Anomalie-Berechnung**
+wie bei der Oberflächentemperatur. Versiegelungsgrad ist wetterunabhängig und
+direkt interpretierbar – es gibt keinen Aufnahmezeitpunkt-Effekt, der eine
+Normierung auf das Gemeindemittel erfordern würde (siehe `METHODIK.md`,
+Abschnitt 2, Ausnahme-Absatz).
+
+### Zugangsweg (Rechercheergebnis)
+
+Vor der Implementierung wurde der aktuell korrekte Zugangsweg zu
+`land.copernicus.eu` recherchiert. Zentrale Ergebnisse:
+
+- **Aktuellste Epoche:** IMD 2021 (10 m, veröffentlicht Sept. 2025, aus
+  Sentinel-2 + Deep-Learning-Modell). Der offizielle Zugang dazu läuft über
+  die **CLMS-Download-API**, die – anders als CDSE – **kein** einfaches
+  Client-ID/Secret-Paar verwendet, sondern einen **EU-Login-Service-Key**
+  (JSON-Datei mit RSA-Private-Key), den man einmalig manuell über die
+  CLMS-Weboberfläche (My Settings → API Tokens) erzeugen und herunterladen
+  muss. Skripte müssten daraus selbst signierte JWTs (RS256) bauen und gegen
+  `https://land.copernicus.eu/@@oauth2-token` tauschen. Diese Zugangsdaten
+  lagen zum Zeitpunkt der Implementierung nicht vor.
+- **Verwendete Epoche: IMD 2018** (10 m) ist zusätzlich über einen
+  **öffentlichen, anmeldefreien EEA-ArcGIS-ImageServer** verfügbar
+  (`image.discomap.eea.europa.eu/arcgis/rest/services/GioLandPublic/
+  HRL_ImperviousnessDensity_2018/ImageServer`) – ein Spiegel des offiziellen
+  CLMS-Produkts. Die `exportImage`-Operation liefert einen direkten,
+  georeferenzierten Ausschnitt für eine beliebige Bounding Box (inkl.
+  Reprojektion durch den Server, hier direkt nach EPSG:25832 angefordert) –
+  funktional gleichwertig zu einem WCS-Zugriff, kein Bulk-Kacheldownload
+  nötig, **kein Login/API-Key erforderlich**.
+- Für IMD 2021 existiert (Stand der Recherche) noch kein entsprechender
+  öffentlicher 10-m-ImageServer; die einzige anmeldefreie Alternative wäre
+  eine **"harmonisierte" 2021-Zeitreihen-Schicht** in nur **100 m**
+  Auflösung – zu grob, um innerhalb kleiner Gemeinden (Sinzheim 28,5 km²)
+  noch zu differenzieren.
+
+**Entscheidung (mit Nutzer abgestimmt):** IMD 2018 über den öffentlichen
+ImageServer verwenden – kein neuer Zugangsdaten-Aufwand, sofort umsetzbar,
+volle 10-m-Auflösung. Diese Entscheidung wurde bewusst gegen die aktuellere
+Epoche IMD 2021 getroffen, die einen deutlich komplexeren Auth-Flow erfordert
+hätte.
+
+**⚠️ Bekannte Limitation – zeitlicher Versatz zu den anderen Kennzahlen:**
+IMD 2018 (Referenzperiode 2017–2019) liegt **zeitlich vor** den
+Datengrundlagen der beiden anderen Kennzahlen dieses Projekts – NDVI basiert
+auf Sentinel-2-Sommer **2025**, die LST-Anomalie auf Landsat-Sommern
+**2021–2025**. Ein direkter Vergleich der drei Kennzahlen im Report ist damit
+**nicht** als "gleicher Zeitpunkt" zu verstehen. Der Versiegelungsgrad ändert
+sich zwar strukturell deutlich langsamer als Vegetation/Temperatur
+(Bodenversiegelung wandelt sich i. d. R. nur durch Neubau/Rückbau), trotzdem
+muss dieser Versatz in jedem Report explizit benannt werden, nicht nur als
+Nebensatz (siehe auch `METHODIK.md`, Limitationen-Tabelle, Punkt 11). Das
+Nachziehen auf IMD 2021 – sobald entweder ein öffentlicher 10-m-Spiegel
+verfügbar ist oder ein CLMS-Service-Key eingerichtet wurde – ist ein offener
+Punkt für Phase 3.
+
+### Ablauf je Skript
+
+1. Gemeindegeometrie laden (inkl. aller Teilflächen bei Sinzheim/
+   Baden-Baden, siehe MultiPolygon-Handling oben).
+2. Bounding Box in EPSG:25832 (+30 m Puffer, auf das 10-m-Raster gerundet)
+   berechnen.
+3. Direkten Ausschnitt per `exportImage` vom EEA-ImageServer laden (bereits
+   in EPSG:25832, bilineare Resampling-Methode, NoData=255 gemäß
+   HRL-Imperviousness-Konvention).
+4. Auf die exakte Gemeindegeometrie maskieren
+   (`rasterio.features.geometry_mask`, MultiPolygon-fähig).
+5. Kennzahlen berechnen: Mittelwert, Min/Max sowie Flächenanteil mit >50 %
+   Versiegelung über das gesamte Gemeindegebiet – **absolut, keine Anomalie**.
+6. GeoTIFF und PNG-Karte speichern (Farbskala hell/grün = 0 % bis
+   dunkel/grau = 100 %, feste Skala für alle drei Gemeinden – keine
+   dynamische Min/Max-Skalierung, da absolute Prozentwerte über
+   Pilotgemeinden vergleichbar sein sollen).
+
+**Aufruf:**
+
+```bash
+python scripts/04_imperviousness_gernsbach.py
+python scripts/04_imperviousness_sinzheim.py
+python scripts/04_imperviousness_badenbaden.py
+```
+
+Benötigt **keine** Zugangsdaten (öffentlicher EEA-ImageServer). Schlägt die
+Anfrage fehl oder liefert der Server keine gültige Bilddatei, bricht das
+Skript mit einer klaren Fehlermeldung ab – kein Platzhalterwert, kein
+stiller Fallback.
+
+Ergebnisse: `outputs/<gemeinde>_imperviousness.tif` (GeoTIFF, nicht
+versioniert) und `outputs/<gemeinde>_imperviousness.png` (Karte, versioniert).
+Am Ende gibt jedes Skript eine Sichtprüfungs-Zusammenfassung aus: Mittelwert,
+Min/Max, Flächenanteil >50 % versiegelt, Quelle/Epoche sowie den Hinweis auf
+den zeitlichen Versatz zu NDVI/LST.
+
+### Lizenzhinweis (Copernicus/EEA)
+
+Zugang zu Copernicus-Daten und -Diensten erfolgt nach dem Prinzip des
+vollständigen, offenen und freien Zugangs (Verordnung (EU) Nr. 1159/2013).
+Bei Weitergabe/Veröffentlichung ist die Quelle zu nennen. Attribution für
+jeden Report (siehe `METHODIK.md`, Abschnitt 8):
+
+> Enthält Copernicus Land Monitoring Service Informationen [Jahr] (HRL
+> Imperviousness, Epoche 2018).
+
 ## Sinzheim (AGS 08216049)
 
 Zweite Pilotgemeinde nach Gernsbach (siehe `PROJECT_CONTEXT.md`,
@@ -233,6 +352,7 @@ laut `PROJECT_CONTEXT.md` erst für Phase 3 vorgesehen):
 - `scripts/01_load_geometry_sinzheim.py`
 - `scripts/02_ndvi_sinzheim.py`
 - `scripts/03_lst_sinzheim.py`
+- `scripts/04_imperviousness_sinzheim.py`
 
 **Besonderheit – MultiPolygon-Geometrie:** Sinzheim besteht aus 9 Ortsteilen,
 von denen 3 als Exklaven vollständig innerhalb der Gemarkung der Stadt
@@ -261,7 +381,8 @@ vorauszusetzen:
   der Teilflächen aber explizit im Titel/in der Konsolenausgabe aus.
 
 Ergebnisse: `data/sinzheim_boundary.geojson`, `outputs/sinzheim_boundary.png`,
-`outputs/sinzheim_ndvi.tif`/`.png`, `outputs/sinzheim_lst_anomaly.tif`/`.png`.
+`outputs/sinzheim_ndvi.tif`/`.png`, `outputs/sinzheim_lst_anomaly.tif`/`.png`,
+`outputs/sinzheim_imperviousness.tif`/`.png`.
 
 **Hinweis zum VG250-Download:** Der direkte Remote-Zip-Zugriff
 (`zip+https://...`, siehe `--url`-Option) ist bei diesem Datenstand
@@ -295,6 +416,7 @@ generischer Mehrgemeinden-Automatisierung:
 - `scripts/01_load_geometry_badenbaden.py`
 - `scripts/02_ndvi_badenbaden.py`
 - `scripts/03_lst_badenbaden.py`
+- `scripts/04_imperviousness_badenbaden.py`
 
 **Besonderheit – Stadtkreis statt kreisangehöriger Gemeinde:** Baden-Baden
 ist ein Stadtkreis (kreisfreie Stadt). Explizit geprüft (nicht angenommen),
@@ -331,7 +453,8 @@ getrennte Anomalie-/Absolutwert-Ausgabe sowie der Hinweis auf die
 Landsat-Vormittags-Überflugzeit.
 
 Ergebnisse: `data/badenbaden_boundary.geojson`, `outputs/badenbaden_boundary.png`,
-`outputs/badenbaden_ndvi.tif`/`.png`, `outputs/badenbaden_lst_anomaly.tif`/`.png`.
+`outputs/badenbaden_ndvi.tif`/`.png`, `outputs/badenbaden_lst_anomaly.tif`/`.png`,
+`outputs/badenbaden_imperviousness.tif`/`.png`.
 
 ## Projektstruktur
 
@@ -348,7 +471,10 @@ Ergebnisse: `data/badenbaden_boundary.geojson`, `outputs/badenbaden_boundary.png
 │   ├── 02_ndvi_badenbaden.py
 │   ├── 03_lst_gernsbach.py
 │   ├── 03_lst_sinzheim.py
-│   └── 03_lst_badenbaden.py
+│   ├── 03_lst_badenbaden.py
+│   ├── 04_imperviousness_gernsbach.py
+│   ├── 04_imperviousness_sinzheim.py
+│   └── 04_imperviousness_badenbaden.py
 ├── data/                       # GeoJSON-Ergebnisse (versioniert)
 └── outputs/                    # PNG-Übersichtskarten (versioniert),
                                  # große Rasterdateien (nicht versioniert)

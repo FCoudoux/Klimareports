@@ -9,4 +9,5 @@ contextily
 openeo
 pystac-client
 planetary-computer
+requests
 python-dotenv

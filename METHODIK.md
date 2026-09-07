@@ -34,7 +34,9 @@ Alle drei Kennzahlen (Oberflächentemperatur, Vegetation, Versiegelung) werden *
 ```
 Anomalie(Pixel) = Wert(Pixel) − Mittelwert(gesamtes Gemeindegebiet)
 ```
-Positive Werte = wärmer/vegetationsärmer als der Gemeindedurchschnitt, negative Werte = kühler/vegetationsreicher. Für NDVI gilt dieselbe Grundregel implizit über die Farbskala, für den Versiegelungsgrad (Phase 3) wird sie analog angewendet.
+Positive Werte = wärmer/vegetationsärmer als der Gemeindedurchschnitt, negative Werte = kühler/vegetationsreicher. Für NDVI gilt dieselbe Grundregel implizit über die Farbskala.
+
+**Ausnahme Versiegelungsgrad (Task 4, siehe README.md):** Entgegen der ursprünglichen Planung in diesem Abschnitt wird der Versiegelungsgrad **nicht** als Anomalie berechnet, sondern als absolute Prozentkennzahl (0–100 % je Pixel, Mittelwert/Min/Max sowie Flächenanteil >50 % über das Gemeindegebiet). Begründung: Versiegelungsgrad ist im Gegensatz zu Oberflächentemperatur und Vegetation **wetterunabhängig** und direkt interpretierbar — es gibt keinen Aufnahmezeitpunkt-/Jahreszeit-Effekt, der eine Normierung auf das Gemeindemittel methodisch erfordern würde. Diese Entscheidung wurde bei der Implementierung von Task 4 ausdrücklich mit dem Auftraggeber abgestimmt.
 
 **Grenze dieses Prinzips, transparent zu benennen:** Die Anomalie sagt nichts über die *absolute* thermische Situation der Gemeinde als Ganzes aus, nur über die *interne* Verteilung. Eine insgesamt sehr warme Gemeinde ohne interne Differenzierung zeigt trotzdem eine flache Anomalie-Karte nahe null. Das ist beabsichtigt (siehe Abbruchkriterium Phase 1), muss aber im Report explizit kommuniziert werden, damit es nicht als "hier ist alles unauffällig" missverstanden wird, wenn eigentlich die ganze Gemeinde strukturell betroffen ist.
 
@@ -113,6 +115,7 @@ Diese Liste ist bewusst vollständig und ungeschönt — sie ist die Grundlage f
 | 8 | **Fehlende Bodenvalidierung** | Keine Kalibrierung gegen tatsächliche Messstationen vor Ort | Parlow (2021) nennt begrenzte Bodenvalidierung als generisches Problem der UHI-Fernerkundungsliteratur<sup>[4]</sup>; für dieses Produkt bewusst nicht vorgesehen (Kostenrahmen), aber im Report als Limitation zu nennen, nicht zu verschweigen |
 | 9 | **Sentinel-2-Wiederholrate und Wolkenfilterung** | Bei ungünstiger Wetterlage (z. B. verregneter Sommer) ggf. zu wenige Termine für einen belastbaren Median-Komposit | Mindestanzahl von 3 Terminen als Warnschwelle implementiert, kein stiller Fallback |
 | 10 | **Bevorstehende Landsat-Collection-3-Neuprozessierung** | Künftige LST-Werte ggf. nicht direkt mit heutigen vergleichbar | Vormerken für Monitoring-Abo (Businessplan A4, Stufe 3) — Versionswechsel muss dokumentiert werden, sobald er eintritt |
+| 11 | **Zeitlicher Versatz Versiegelungsgrad ggü. NDVI/LST** (Task 4) | CLMS HRL Imperviousness Epoche 2018 (Referenzperiode 2017–2019) liegt vor Sentinel-2-Sommer 2025 (NDVI) und Landsat-Sommern 2021–2025 (LST) — die drei Kennzahlen im Report bilden nicht denselben Zeitpunkt ab | Explizit im Report zu benennen (siehe README.md, Abschnitt Task 4); Grund ist der komplexere Auth-Zugang (EU-Login-Service-Key statt Client-ID/Secret) für die aktuellere Epoche IMD 2021 — Nachziehen auf IMD 2021 ist ein offener Punkt für Phase 3 |
 
 ---
 
@@ -126,13 +129,14 @@ Kein stiller Fallback, keine Interpolation über fehlende Daten hinweg, kein Pla
 
 > Enthält modifizierte Copernicus-Sentinel-Daten [Jahr], verarbeitet durch FCX.
 > Enthält Landsat-Daten des U.S. Geological Survey.
+> Enthält Copernicus Land Monitoring Service Informationen [Jahr] (HRL Imperviousness, Epoche siehe Report).
 > Verwaltungsgeometrien: © GeoBasis-DE / BKG [Jahr] (dl-de/by-2-0).
 
 ---
 
 ## 9. Offene Punkte vor Abschluss von Phase 2
 
-1. Klassifizierungslogik für Versiegelungsgrad (CLMS-Daten, noch nicht implementiert) analog zu NDVI/LST festlegen.
+1. ~~Klassifizierungslogik für Versiegelungsgrad (CLMS-Daten) festlegen.~~ Erledigt (Task 4): absolute Prozentkennzahl statt Anomalie, siehe Abschnitt 2 und README.md.
 2. Wolkenfilterungs-Inkonsistenz zwischen Gernsbach und den beiden anderen Pilotgemeinden beheben (siehe Tabelle Punkt 5).
 3. Referenzgruppen-Frage klären (Abschnitt 5) — realistischerweise erst mit mehr Pilotgemeinden oder externer Vergleichsstatistik lösbar.
 4. **Externe Plausibilisierung einholen** (Businessplan Phase 2, Punkt 5) — dieses Dokument ist die Diskussionsgrundlage dafür, nicht der Ersatz dafür.
